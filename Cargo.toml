@@ -1,0 +1,28 @@
+[package]
+name = "herdr-image-hints"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Herdr plugin: type a one-key hint over an image path in a pane to show the image in a popup"
+license = "MIT"
+repository = "https://github.com/pglira/herdr-image-hints"
+readme = "README.md"
+keywords = ["herdr", "terminal", "tui", "image", "kitty-graphics"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["bmp", "exr", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp"] }
+crossterm = "0.29"
+ratatui = "0.30"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+toml = "0.9"
+unicode-width = "0.2"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1

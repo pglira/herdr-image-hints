@@ -1,0 +1,32 @@
+id = "pglira.herdr-image-hints"
+name = "Herdr Image Hints"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Type a one-key hint over an image path in the pane to show the image in a popup, drawn with Kitty graphics."
+platforms = ["linux", "macos"]
+
+[[build]]
+command = ["sh", "scripts/build.sh"]
+
+[[actions]]
+id = "start"
+title = "Image hints: show hints"
+description = "Label every image path in the focused pane; type a label to show that image in a popup."
+contexts = ["pane", "workspace", "global"]
+command = ["./target/release/herdr-image-hints", "start"]
+
+# The overlay itself. Opened by the `start` action, never bind it directly:
+# the action records where the focused pane sits first, so the hints land on it.
+[[panes]]
+id = "overlay"
+title = "Image hints"
+placement = "overlay"
+command = ["./target/release/herdr-image-hints", "ui"]
+
+# The image popup. Opened by the overlay with the image path in its
+# environment, never bind it directly.
+[[panes]]
+id = "viewer"
+title = "Image"
+placement = "popup"
+command = ["./target/release/herdr-image-hints", "view"]

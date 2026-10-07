@@ -1,0 +1,46 @@
+# herdr-image-hints configuration.
+#
+# Lives at $HERDR_PLUGIN_CONFIG_DIR/config.toml; print that directory with
+#   herdr plugin config-dir pglira.herdr-image-hints
+# Every key is optional. The values below are the defaults.
+
+# Keys hints are built from, best keys first. One of:
+#   qwerty, qwerty-homerow, qwerty-left-hand, qwerty-right-hand,
+#   azerty, azerty-homerow, azerty-left-hand, azerty-right-hand,
+#   qwertz, qwertz-homerow, qwertz-left-hand, qwertz-right-hand,
+#   dvorak, dvorak-homerow, dvorak-left-hand, dvorak-right-hand,
+#   colemak, colemak-homerow, colemak-left-hand, colemak-right-hand
+keyboard_layout = "qwerty"
+
+# Or spell the keys out yourself (overrides keyboard_layout): lowercase
+# letters and digits. c, i, m, n and q are reserved for the overlay's own
+# controls and silently skipped.
+# alphabet = "asdfghjkl"
+
+# Where the hint sits over its match: "left" or "right".
+hint_position = "left"
+
+# File extensions that make a path an image path (case is ignored).
+# extensions = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "ico",
+#               "qoi", "tga", "pnm", "pbm", "pgm", "ppm", "exr", "hdr"]
+
+# Your own patterns, in Rust regex syntax, tried before the image pattern. A
+# group named `match` narrows the path to that group.
+# [[patterns]]
+# name = "plot"
+# regex = "saved figure (?P<match>\\S+)"
+
+# Size of the image popup: a cell count or a percentage of the terminal.
+popup_width = "85%"
+popup_height = "85%"
+
+# Colors: names (black, red, green, yellow, blue, magenta, cyan, white, gray,
+# light-red … bright-white), palette indexes (0-255) or "#RRGGBB".
+# Attributes: bold, dim, italic, underline, reverse, strikethrough.
+[style]
+hint = { fg = "black", bg = "yellow", bold = true }
+highlight = { fg = "yellow" }
+selected_hint = { fg = "black", bg = "light-blue", bold = true }
+selected_highlight = { fg = "light-blue" }
+# Restyle everything that is not a match, for instance dim it:
+# backdrop = { dim = true }
