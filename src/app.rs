@@ -16,7 +16,9 @@ use crate::domain::matcher::find_candidates;
 use crate::domain::screen::Screen;
 use crate::domain::session::Session;
 use crate::domain::settings::Settings;
-use crate::usecases::pick::{self, Deps, IMAGE_ENV, PickError, PickRequest, Picked};
+use crate::usecases::pick::{
+    self, Deps, IMAGE_ENV, PickError, PickRequest, Picked, VIEWER_ENTRYPOINT,
+};
 use crate::usecases::start::{self, GEOMETRY_ENV, StartError};
 
 #[derive(Debug, Error)]
@@ -39,6 +41,10 @@ pub enum AppError {
     UnknownOption(String),
     #[error("no image: Herdr did not pass {IMAGE_ENV}")]
     NoImage,
+    #[error("usage: herdr-image-hints open <image>")]
+    NoPath,
+    #[error("not a file: {0}")]
+    NotAFile(String),
 }
 
 /// `start`: the plugin action.
@@ -106,10 +112,36 @@ fn run_overlay(context: &PluginContext) -> Result<(), AppError> {
 }
 
 /// `view`: runs inside the popup pane and draws the image named by
-/// `HERDR_IMAGE_HINTS_FILE`.
+/// `HERDR_IMAGE_HINTS_FILE`, stepping through the images next to it.
 pub fn view() -> Result<(), AppError> {
     let path = std::env::var_os(IMAGE_ENV).ok_or(AppError::NoImage)?;
-    viewer::show(std::path::Path::new(&path))?;
+    let context = PluginContext::from_env();
+    let settings = config::load(context.config_dir.as_deref()).unwrap_or_default();
+    viewer::show(std::path::Path::new(&path), &settings.extensions)?;
+    Ok(())
+}
+
+/// `open`: shows an image in the popup from outside the overlay, for file
+/// managers and scripts that run in a Herdr pane.
+pub fn open(args: &[String]) -> Result<(), AppError> {
+    let path = args.first().ok_or(AppError::NoPath)?;
+    let path = std::path::absolute(path)?;
+    if !path.is_file() {
+        return Err(AppError::NotAFile(path.display().to_string()));
+    }
+    let context = PluginContext::from_env();
+    let config_dir = context.config_dir.clone().or_else(|| {
+        std::env::var_os("HOME").map(|home| {
+            std::path::PathBuf::from(home)
+                .join(".config/herdr/plugins/config")
+                .join(&context.plugin_id)
+        })
+    });
+    let settings = config::load(config_dir.as_deref()).unwrap_or_default();
+    let client = HerdrClient::from_env()?;
+    let env =
+        std::collections::BTreeMap::from([(IMAGE_ENV.to_string(), path.display().to_string())]);
+    client.open_plugin_popup(&context.plugin_id, VIEWER_ENTRYPOINT, env, &settings.popup)?;
     Ok(())
 }
 

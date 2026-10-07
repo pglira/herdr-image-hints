@@ -208,6 +208,7 @@ pub fn parse(text: &str) -> Result<Settings, ConfigError> {
     Ok(Settings {
         alphabet,
         patterns: pattern_set,
+        extensions,
         theme,
         popup,
     })

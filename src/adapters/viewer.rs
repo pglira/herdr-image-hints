@@ -1,14 +1,16 @@
 //! The image popup: decodes the image and draws it centered with the Kitty
-//! graphics protocol, which Herdr forwards to a capable outer terminal. Any
-//! key closes the popup.
+//! graphics protocol, which Herdr forwards to a capable outer terminal. The
+//! footer shows the path; j/k (or the arrow keys) step to the next/previous
+//! image in the same directory, y copies the absolute path to the clipboard
+//! (OSC 52), any other key closes the popup.
 
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::terminal::{self, WindowSize};
 use crossterm::{cursor, execute, queue, style};
 use image::DynamicImage;
@@ -19,17 +21,63 @@ const CHUNK: usize = 4096;
 /// Cell size assumed when the terminal reports no pixel size.
 const FALLBACK_CELL: (f64, f64) = (10.0, 20.0);
 
-/// Shows the image at `path` until a key is pressed.
-pub fn show(path: &Path) -> io::Result<()> {
-    let image = decode(path);
+/// Shows the image at `path` and lets the user step through the images
+/// next to it (those with one of `extensions`) until a key closes the popup.
+pub fn show(path: &Path, extensions: &[String]) -> io::Result<()> {
+    let entries: Vec<PathBuf> = path
+        .parent()
+        .and_then(|dir| std::fs::read_dir(dir).ok())
+        .map(|dir| dir.filter_map(|e| e.ok().map(|e| e.path())).collect())
+        .unwrap_or_default();
+    let images: Vec<PathBuf> = entries.into_iter().filter(|p| p.is_file()).collect();
+    let (images, index) = siblings(images, path, extensions);
     let mut out = io::stdout();
     terminal::enable_raw_mode()?;
     execute!(out, terminal::EnterAlternateScreen, cursor::Hide)?;
-    let result = run(&mut out, path, &image);
+    let result = run(&mut out, &images, index);
     let _ = write!(out, "\x1b_Ga=d,d=A,q=2\x1b\\");
     let _ = execute!(out, cursor::Show, terminal::LeaveAlternateScreen);
     let _ = terminal::disable_raw_mode();
     result
+}
+
+/// The images among `files` (by extension, case ignored) sorted by name,
+/// with `current` always among them, and the index of `current`.
+pub fn siblings(
+    files: Vec<PathBuf>,
+    current: &Path,
+    extensions: &[String],
+) -> (Vec<PathBuf>, usize) {
+    let is_image = |path: &Path| {
+        path.extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| extensions.iter().any(|x| x.eq_ignore_ascii_case(e)))
+    };
+    let mut images: Vec<PathBuf> = files.into_iter().filter(|p| is_image(p)).collect();
+    if !images.iter().any(|p| p == current) {
+        images.push(current.to_path_buf());
+    }
+    images.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    let index = images.iter().position(|p| p == current).unwrap_or(0);
+    (images, index)
+}
+
+/// What a key does in the popup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    Next,
+    Previous,
+    Copy,
+    Close,
+}
+
+pub fn step_for(code: KeyCode) -> Step {
+    match code {
+        KeyCode::Char('j') | KeyCode::Down | KeyCode::Right => Step::Next,
+        KeyCode::Char('k') | KeyCode::Up | KeyCode::Left => Step::Previous,
+        KeyCode::Char('y') => Step::Copy,
+        _ => Step::Close,
+    }
 }
 
 fn decode(path: &Path) -> Result<DynamicImage, String> {
@@ -41,14 +89,47 @@ fn decode(path: &Path) -> Result<DynamicImage, String> {
         .map_err(|error| error.to_string())
 }
 
-fn run(out: &mut impl Write, path: &Path, image: &Result<DynamicImage, String>) -> io::Result<()> {
-    draw(out, path, image, settled_size()?)?;
+fn run(out: &mut impl Write, images: &[PathBuf], mut index: usize) -> io::Result<()> {
+    let mut image = decode(&images[index]);
+    let mut size = settled_size()?;
+    draw(
+        out,
+        &images[index],
+        &image,
+        (index, images.len()),
+        &size,
+        false,
+    )?;
     loop {
+        let mut copied = false;
         match event::read()? {
-            Event::Key(key) if key.kind == KeyEventKind::Press => return Ok(()),
-            Event::Resize(..) => draw(out, path, image, settled_size()?)?,
-            _ => {}
+            Event::Key(key) if key.kind == KeyEventKind::Press => match step_for(key.code) {
+                Step::Close => return Ok(()),
+                Step::Copy => {
+                    let path = std::path::absolute(&images[index])?;
+                    write!(out, "{}", osc52(&path.display().to_string()))?;
+                    copied = true;
+                }
+                step => {
+                    index = if step == Step::Next {
+                        (index + 1) % images.len()
+                    } else {
+                        (index + images.len() - 1) % images.len()
+                    };
+                    image = decode(&images[index]);
+                }
+            },
+            Event::Resize(..) => size = settled_size()?,
+            _ => continue,
         }
+        draw(
+            out,
+            &images[index],
+            &image,
+            (index, images.len()),
+            &size,
+            copied,
+        )?;
     }
 }
 
@@ -76,7 +157,9 @@ fn draw(
     out: &mut impl Write,
     path: &Path,
     image: &Result<DynamicImage, String>,
-    size: WindowSize,
+    (index, count): (usize, usize),
+    size: &WindowSize,
+    copied: bool,
 ) -> io::Result<()> {
     write!(out, "\x1b_Ga=d,d=A,q=2\x1b\\")?;
     queue!(out, terminal::Clear(terminal::ClearType::All))?;
@@ -85,25 +168,27 @@ fn draw(
         || path.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
     );
-    let footer = match image {
+    let details = match image {
         Ok(image) => {
-            let cell = cell_size(&size);
+            let cell = cell_size(size);
             let placement = fit((image.width(), image.height()), cell, area);
             draw_image(out, image, cell, placement)?;
-            format!(
-                "{name}  {}×{}  ·  any key closes",
-                image.width(),
-                image.height()
-            )
+            format!("{}×{}", image.width(), image.height())
         }
         Err(error) => {
             let message = format!("cannot show {name}: {error}");
             let x = area.0.saturating_sub(width(&message)) / 2;
             queue!(out, cursor::MoveTo(x, area.1 / 2), style::Print(&message))?;
-            "any key closes".to_string()
+            "unreadable".to_string()
         }
     };
-    let footer: String = footer.chars().take(usize::from(size.columns)).collect();
+    let keys = if copied {
+        "path copied"
+    } else {
+        "j/k next/prev · y copy path"
+    };
+    let tail = format!("  ·  {details}  ·  {}/{count}  ·  {keys}", index + 1);
+    let footer = footer(&path.display().to_string(), &tail, size.columns);
     let x = size.columns.saturating_sub(width(&footer)) / 2;
     queue!(
         out,
@@ -113,6 +198,31 @@ fn draw(
         style::SetAttribute(style::Attribute::Reset)
     )?;
     out.flush()
+}
+
+/// The OSC 52 sequence that puts `text` on the system clipboard; Herdr
+/// passes it on to the outer terminal.
+pub fn osc52(text: &str) -> String {
+    format!("\x1b]52;c;{}\x07", STANDARD.encode(text))
+}
+
+/// `path` followed by `tail`, cut to `columns`: the path loses its start
+/// first (marked with "…"), so the file name stays visible.
+pub fn footer(path: &str, tail: &str, columns: u16) -> String {
+    let columns = usize::from(columns);
+    let full = format!("{path}{tail}");
+    if full.chars().count() <= columns {
+        return full;
+    }
+    let room = columns.saturating_sub(tail.chars().count() + 1);
+    if room == 0 {
+        return full.chars().take(columns).collect();
+    }
+    let keep: String = path
+        .chars()
+        .skip(path.chars().count() - room.min(path.chars().count()))
+        .collect();
+    format!("…{keep}{tail}")
 }
 
 fn width(text: &str) -> u16 {
@@ -246,6 +356,56 @@ mod tests {
         assert!(text.starts_with("\x1b_Ga=T,f=100,q=2,C=1,c=30,r=12,m=1;"));
         assert!(text.contains("\x1b\\\x1b_Gm=0;AAAAAAAAAA\x1b\\"));
         assert_eq!(text.matches("\x1b_G").count(), 2);
+    }
+
+    #[test]
+    fn siblings_are_the_images_of_the_directory_sorted_by_name() {
+        let exts = vec!["png".to_string(), "jpg".to_string()];
+        let files = ["/d/c.JPG", "/d/a.png", "/d/notes.md", "/d/b.png"]
+            .map(PathBuf::from)
+            .to_vec();
+        let (images, index) = siblings(files, Path::new("/d/b.png"), &exts);
+        assert_eq!(
+            images,
+            ["/d/a.png", "/d/b.png", "/d/c.JPG"]
+                .map(PathBuf::from)
+                .to_vec()
+        );
+        assert_eq!(index, 1);
+    }
+
+    #[test]
+    fn the_shown_image_is_kept_even_without_a_known_extension() {
+        let exts = vec!["png".to_string()];
+        let files = ["/d/a.png", "/d/x.raw"].map(PathBuf::from).to_vec();
+        let (images, index) = siblings(files, Path::new("/d/x.raw"), &exts);
+        assert_eq!(images, ["/d/a.png", "/d/x.raw"].map(PathBuf::from).to_vec());
+        assert_eq!(index, 1);
+    }
+
+    #[test]
+    fn j_and_k_step_y_copies_and_every_other_key_closes() {
+        assert_eq!(step_for(KeyCode::Char('j')), Step::Next);
+        assert_eq!(step_for(KeyCode::Right), Step::Next);
+        assert_eq!(step_for(KeyCode::Char('k')), Step::Previous);
+        assert_eq!(step_for(KeyCode::Up), Step::Previous);
+        assert_eq!(step_for(KeyCode::Char('y')), Step::Copy);
+        assert_eq!(step_for(KeyCode::Char('q')), Step::Close);
+        assert_eq!(step_for(KeyCode::Esc), Step::Close);
+    }
+
+    #[test]
+    fn the_path_goes_to_the_clipboard_as_base64_in_osc_52() {
+        assert_eq!(osc52("/a.png"), "\x1b]52;c;L2EucG5n\x07");
+    }
+
+    #[test]
+    fn a_long_footer_drops_the_start_of_the_path() {
+        assert_eq!(footer("/a/b.png", "  ·  1/2", 40), "/a/b.png  ·  1/2");
+        assert_eq!(
+            footer("/very/long/dir/b.png", " | 1/2", 16),
+            "…dir/b.png | 1/2"
+        );
     }
 
     #[test]

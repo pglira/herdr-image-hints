@@ -27,12 +27,33 @@ Then run `herdr server reload-config`.
 ## Use
 
 1. Press the key. Every image path on the screen gets a hint. A path can be absolute (`/tmp/plot.png`), relative to the working directory of the pane (`out/fig.jpg`), or start with `~/`.
-2. Type the hint. The image opens in a popup, scaled to fit and centered.
-3. Press any key to close the popup.
+2. Type the hint. The image opens in a popup, scaled to fit and centered. The footer shows the absolute path, the size, and the position in the directory.
+3. In the popup:
+   - `j` (or `↓`, `→`) shows the next image in the same directory, `k` (or `↑`, `←`) the previous one.
+   - `y` copies the absolute path to the clipboard (OSC 52).
+   - Any other key closes the popup.
 
 `Esc`, `q` or `Ctrl+C` closes the hints without a pick, and `?` shows the help. A path that does not exist gives a Herdr notification.
 
 Supported formats: PNG, JPEG, GIF (first frame), WebP, BMP, TIFF, ICO, QOI, TGA, PNM, OpenEXR and Radiance HDR.
+
+## Open an image from other programs
+
+`herdr-image-hints open <image>` opens the same popup from any program that runs in a Herdr pane. The binary is at `target/release/herdr-image-hints` in the plugin directory:
+
+```sh
+root="$(herdr plugin list --plugin pglira.herdr-image-hints --json | jq -r '.result.plugins[0].plugin_root')"
+ln -s "$root/target/release/herdr-image-hints" ~/.local/bin/herdr-image-hints
+```
+
+For example, a [yazi](https://yazi-rs.github.io) key that shows the hovered file (`keymap.toml`):
+
+```toml
+[[mgr.prepend_keymap]]
+on   = "<C-y>"
+run  = "shell 'herdr-image-hints open %h'"
+desc = "Show the image in a herdr popup"
+```
 
 ## Configuration
 

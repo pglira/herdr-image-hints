@@ -53,7 +53,11 @@ fn the_start_action_runs_the_release_binary() {
     let build = manifest["build"][0]["command"]
         .as_array()
         .expect("a build command");
-    assert!(build.iter().any(|arg| arg.as_str() == Some("scripts/build.sh")));
+    assert!(
+        build
+            .iter()
+            .any(|arg| arg.as_str() == Some("scripts/build.sh"))
+    );
 }
 
 #[test]

@@ -10,6 +10,7 @@ Usage:
   herdr-image-hints start                    plugin action: open the hints overlay
   herdr-image-hints ui                       the overlay itself (run by Herdr)
   herdr-image-hints view                     the image popup (run by Herdr)
+  herdr-image-hints open <image>             show an image in the popup (from a Herdr pane)
   herdr-image-hints scan [--width N] < dump  list the hints a screen dump would get
   herdr-image-hints default-config           print the commented default config.toml
   herdr-image-hints --version";
@@ -20,6 +21,7 @@ fn main() -> ExitCode {
         Some("start") => app::start(),
         Some("ui") => app::ui(),
         Some("view") => app::view(),
+        Some("open") => app::open(&args[1..]),
         Some("scan") => app::scan(&args[1..]),
         Some("default-config") => {
             print!("{DEFAULT_CONFIG}");

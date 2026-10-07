@@ -2,7 +2,7 @@
 //! raw config file.
 
 use super::alphabet::Alphabet;
-use super::patterns::PatternSet;
+use super::patterns::{DEFAULT_EXTENSIONS, PatternSet};
 use super::style::{Color, TextStyle};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -48,6 +48,9 @@ impl Default for Theme {
 pub struct Settings {
     pub alphabet: Alphabet,
     pub patterns: PatternSet,
+    /// Lowercase image extensions: what the pattern matches and what the
+    /// popup steps through in the image's directory.
+    pub extensions: Vec<String>,
     pub theme: Theme,
     pub popup: PopupSize,
 }
@@ -84,6 +87,7 @@ impl Default for Settings {
         Settings {
             alphabet: Alphabet::default(),
             patterns: PatternSet::images(),
+            extensions: DEFAULT_EXTENSIONS.iter().map(|e| e.to_string()).collect(),
             theme: Theme::default(),
             popup: PopupSize::default(),
         }
